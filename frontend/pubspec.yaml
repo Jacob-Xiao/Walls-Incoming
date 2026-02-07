@@ -1,0 +1,24 @@
+name: wallsincoming
+description: Walls Incoming - A front camera based game.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.10.5+9
+  camera_web: ^0.3.5+3
+  camera_windows: ^0.2.6+4
+  http: ^1.1.0
+  http_parser: ^4.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
