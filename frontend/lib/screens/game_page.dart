@@ -56,6 +56,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   /// Score for the last finished level (shown on result island)
   int _lastScore = 0;
 
+  /// Highest score across all levels (shown on result island)
+  int _highestScore = 0;
+
   @override
   void initState() {
     super.initState();
@@ -157,6 +160,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           _gameResult = passed;
           _failedKeypointIndices = passed ? [] : failedIndices;
           _lastScore = score;
+          if (score > _highestScore) _highestScore = score;
           if (imgBytes != null) _annotatedImageBytes = imgBytes;
         });
       }
@@ -694,13 +698,21 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
                   const SizedBox(height: 12),
 
-                  // Score
+                  // Score & Best
                   Text(
                     'Score: $_lastScore',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
                       color: glow,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Best: $_highestScore',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.white.withOpacity(0.7),
                     ),
                   ),
 
