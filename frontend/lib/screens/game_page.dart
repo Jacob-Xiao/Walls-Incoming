@@ -53,6 +53,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   /// Current level: 1 = semicircle hole, 2 = center rectangle hole
   int _currentLevel = 1;
 
+  /// Score for the last finished level (shown on result island)
+  int _lastScore = 0;
+
   @override
   void initState() {
     super.initState();
@@ -97,10 +100,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   /// Capture final frame at wall close; pass/fail from keypoints vs wall (any on wall = fail)
   Future<void> _finalCaptureAndCheck() async {
     final size = MediaQuery.of(context).size;
-    if (_controller == null || !_controller!.value.isInitialized || !mounted) {
+      if (_controller == null || !_controller!.value.isInitialized || !mounted) {
       if (mounted) setState(() {
         _gameResult = false;
         _failedKeypointIndices = [];
+        _lastScore = 0;
       });
       return;
     }
@@ -122,6 +126,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         setState(() {
           _gameResult = false;
           _failedKeypointIndices = [];
+          _lastScore = 0;
         });
         return;
       }
@@ -132,6 +137,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       final w = (data['image_width'] as num?)?.toInt() ?? 0;
       final h = (data['image_height'] as num?)?.toInt() ?? 0;
       final (passed, failedIndices) = _checkKeypointsInHoleWithKeypoints(size, kpts ?? [], w, h);
+      final keypointCount = (kpts ?? []).length;
+      // Pass: 10 per keypoint. Fail: 10 per in-hole (green), 5 per on-wall (red)
+      final score = passed
+          ? keypointCount * 10
+          : (keypointCount - failedIndices.length) * 10 + failedIndices.length * 5;
       Uint8List? imgBytes;
       final annBase64 = data['annotated_image_base64'] as String?;
       if (annBase64 != null && annBase64.isNotEmpty) {
@@ -146,6 +156,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           _imageHeight = h;
           _gameResult = passed;
           _failedKeypointIndices = passed ? [] : failedIndices;
+          _lastScore = score;
           if (imgBytes != null) _annotatedImageBytes = imgBytes;
         });
       }
@@ -154,6 +165,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       if (mounted) setState(() {
         _gameResult = false;
         _failedKeypointIndices = [];
+        _lastScore = 0;
       });
     }
   }
@@ -677,6 +689,18 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                       letterSpacing: 2,
                       height: 1.4,
                       color: Colors.white.withOpacity(0.75),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Score
+                  Text(
+                    'Score: $_lastScore',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: glow,
                     ),
                   ),
 
