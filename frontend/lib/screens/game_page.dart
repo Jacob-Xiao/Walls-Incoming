@@ -17,6 +17,11 @@ const double _holeWidthRatio = 0.85;
 /// Level 2: center rectangle hole width ratio (medium width, through to bottom)
 const double _holeWidthRatioRect = 0.40;
 
+/// Level 3: person-shaped hole (head + torso proportions)
+const double _personHeadRadiusRatio = 0.10;
+const double _personBodyWidthRatio = 0.22;
+const double _personHeadTopMarginRatio = 0.08;
+
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
 
@@ -50,7 +55,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   bool _checkTriggered = false;
   bool _isCapturing = false;
 
-  /// Current level: 1 = semicircle hole, 2 = center rectangle hole
+  /// Current level: 1 = semicircle, 2 = rectangle, 3 = person-shaped hole
   int _currentLevel = 1;
 
   /// Score for the last finished level (shown on result island)
@@ -214,7 +219,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         false,
       );
       holePath.close();
-    } else {
+    } else if (_currentLevel == 2) {
       // Level 2: center medium-width rectangle through to bottom
       final holeW = size.shortestSide * _holeWidthRatioRect;
       holePath.addRect(Rect.fromCenter(
@@ -222,6 +227,23 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         width: holeW,
         height: size.height,
       ));
+    } else {
+      // Level 3: person-shaped hole (head circle + torso rounded rect)
+      final headR = size.shortestSide * _personHeadRadiusRatio;
+      final headCenterY = size.height * _personHeadTopMarginRatio + headR;
+      final bodyW = size.shortestSide * _personBodyWidthRatio;
+      final bodyLeft = centerX - bodyW / 2;
+      final bodyRight = centerX + bodyW / 2;
+      final bodyTop = headCenterY - headR * 0.3;
+      final headPath = Path()
+        ..addOval(Rect.fromCircle(center: Offset(centerX, headCenterY), radius: headR));
+      final bodyPath = Path()
+        ..addRRect(RRect.fromRectAndCorners(
+          Rect.fromLTRB(bodyLeft, bodyTop, bodyRight, size.height),
+          topLeft: const Radius.circular(12),
+          topRight: const Radius.circular(12),
+        ));
+      holePath.addPath(Path.combine(PathOperation.union, headPath, bodyPath), Offset.zero);
     }
     return holePath;
   }
@@ -361,10 +383,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     _wallAnimationController.reset();
   }
 
-  /// Enter next level after clearing level 1
+  /// Enter next level after clearing current level
   void _goToNextLevel() {
+    if (_currentLevel >= 3) return;
     setState(() {
-      _currentLevel = 2;
+      _currentLevel = _currentLevel + 1;
       _gameResult = null;
       _checkTriggered = false;
       _keypoints = [];
@@ -529,7 +552,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    _currentLevel == 1 ? 'Difficulty: Easy' : 'Difficulty: Medium',
+                    _currentLevel == 1
+                        ? 'Difficulty: Easy'
+                        : _currentLevel == 2
+                            ? 'Difficulty: Medium'
+                            : 'Difficulty: Hard',
                     style: TextStyle(
                       fontSize: 14,
                       letterSpacing: 4,
@@ -581,7 +608,11 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
             child: CustomPaint(
               size: MediaQuery.of(context).size,
               painter: WallPainter(
-                holeType: _currentLevel == 1 ? WallHoleType.semicircle : WallHoleType.rectangle,
+                holeType: _currentLevel == 1
+                    ? WallHoleType.semicircle
+                    : _currentLevel == 2
+                        ? WallHoleType.rectangle
+                        : WallHoleType.person,
               ),
             ),
           ),
@@ -749,7 +780,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
-                      if (passed && _currentLevel == 1) ...[
+                      if (passed && _currentLevel < 3) ...[
                         const SizedBox(width: 10),
                         Expanded(
                           child: SizedBox(
@@ -873,7 +904,7 @@ class KeypointsOverlayPainter extends CustomPainter {
   }
 }
 
-enum WallHoleType { semicircle, rectangle }
+enum WallHoleType { semicircle, rectangle, person }
 
 class WallPainter extends CustomPainter {
   WallPainter({required this.holeType});
@@ -944,6 +975,25 @@ class WallPainter extends CustomPainter {
         outlinePath.lineTo(left, size.height);
         outlinePath.lineTo(left, 0);
         outlinePath.close();
+        break;
+
+      case WallHoleType.person:
+        final headR = size.shortestSide * _personHeadRadiusRatio;
+        final headCenterY = size.height * _personHeadTopMarginRatio + headR;
+        final bodyW = size.shortestSide * _personBodyWidthRatio;
+        final bodyLeft = centerX - bodyW / 2;
+        final bodyRight = centerX + bodyW / 2;
+        final bodyTop = headCenterY - headR * 0.3;
+        final headPath = Path()
+          ..addOval(Rect.fromCircle(center: Offset(centerX, headCenterY), radius: headR));
+        final bodyPath = Path()
+          ..addRRect(RRect.fromRectAndCorners(
+            Rect.fromLTRB(bodyLeft, bodyTop, bodyRight, size.height),
+            topLeft: const Radius.circular(12),
+            topRight: const Radius.circular(12),
+          ));
+        holePath.addPath(Path.combine(PathOperation.union, headPath, bodyPath), Offset.zero);
+        outlinePath.addPath(Path.combine(PathOperation.union, headPath, bodyPath), Offset.zero);
         break;
     }
 
