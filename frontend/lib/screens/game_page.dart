@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show pi;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
@@ -29,13 +30,19 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   late AnimationController _wallAnimationController;
   late Animation<double> _wallScaleAnimation;
 
-  /// 当前检测到的关键点 [x_norm, y_norm, confidence]，归一化到 [0,1]
+  /// 当前检测到的关键点 [x_norm, y_norm, confidence]，来自 result.keypoints.xyn 归一化 [0,1]
   List<List<double>> _keypoints = [];
   int _imageWidth = 0;
   int _imageHeight = 0;
 
+  /// 后端返回的 YOLO plot 图像流（img = results.plot(line_width=1)）
+  Uint8List? _annotatedImageBytes;
+
   /// 过关判定结果：null=未判定，true=过关，false=未过关
   bool? _gameResult;
+
+  /// 未过关时，覆盖在墙上的关键点索引
+  List<int> _failedKeypointIndices = [];
   Timer? _poseDetectionTimer;
   bool _checkTriggered = false;
   bool _isCapturing = false;
@@ -77,15 +84,18 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     _checkTriggered = true;
     _poseDetectionTimer?.cancel();
 
-    // 用「墙闭合瞬间」的一帧做判定，避免用 0~800ms 前的旧关键点误判
+    // 墙闭合的最后一帧进行判定，取该帧的墙进行对比判断
     await _finalCaptureAndCheck();
   }
 
-  /// 拍一张最终帧，等 API 返回后用该帧关键点做过关判定
+  /// 拍墙闭合的最后一帧，等 API 返回后用该帧关键点与墙对比判定（有关键点覆盖在墙上则不通过）
   Future<void> _finalCaptureAndCheck() async {
     final size = MediaQuery.of(context).size;
     if (_controller == null || !_controller!.value.isInitialized || !mounted) {
-      if (mounted) setState(() => _gameResult = false);
+      if (mounted) setState(() {
+        _gameResult = false;
+        _failedKeypointIndices = [];
+      });
       return;
     }
     try {
@@ -103,7 +113,10 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       final response = await http.Response.fromStream(streamed);
       if (!mounted) return;
       if (response.statusCode != 200) {
-        setState(() => _gameResult = false);
+        setState(() {
+          _gameResult = false;
+          _failedKeypointIndices = [];
+        });
         return;
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -112,41 +125,70 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           .toList();
       final w = (data['image_width'] as num?)?.toInt() ?? 0;
       final h = (data['image_height'] as num?)?.toInt() ?? 0;
-      final passed = _checkKeypointsInHoleWithKeypoints(size, kpts ?? [], w, h);
+      final (passed, failedIndices) = _checkKeypointsInHoleWithKeypoints(size, kpts ?? [], w, h);
+      final annBase64 = data['annotated_image_base64'] as String?;
+      final annBytes = annBase64 != null && annBase64.isNotEmpty
+          ? Uint8List.fromList(base64Decode(annBase64))
+          : null;
       if (mounted) {
         setState(() {
           _keypoints = kpts ?? [];
           _imageWidth = w;
           _imageHeight = h;
+          _annotatedImageBytes = annBytes;
           _gameResult = passed;
+          _failedKeypointIndices = passed ? [] : failedIndices;
         });
       }
     } catch (e) {
       debugPrint('Final capture/check error: $e');
-      if (mounted) setState(() => _gameResult = false);
+      if (mounted) setState(() {
+        _gameResult = false;
+        _failedKeypointIndices = [];
+      });
     }
   }
 
-  /// 过关判定：墙闭合瞬间，该帧检测到的所有关键点均在该瞬间墙的空洞内（与绘制用同一空洞参数）
-  bool _checkKeypointsInHoleWithKeypoints(
+  /// 过关判定：墙闭合最后一帧，取该帧的墙进行对比；若有关键点覆盖在墙上则不通过
+  /// 返回 (是否过关, 覆盖在墙上的关键点索引列表)
+  (bool, List<int>) _checkKeypointsInHoleWithKeypoints(
     Size screenSize,
     List<List<double>> keypoints,
     int imageWidth,
     int imageHeight,
   ) {
-    if (keypoints.isEmpty) return false;
-    final holeW = screenSize.shortestSide * _holeWidthRatio;
-    final r = holeW / 2;
-    final centerX = screenSize.width * 0.5;
-    final circleCenterY = screenSize.height - r;
-    for (final kp in keypoints) {
+    if (keypoints.isEmpty) return (false, []);
+    final holePath = _buildHolePath(screenSize);
+    final failedIndices = <int>[];
+    for (var i = 0; i < keypoints.length; i++) {
+      final kp = keypoints[i];
       if (kp.length < 2) continue;
       final screenPos = _normToScreenWithSize(kp[0], kp[1], screenSize, imageWidth, imageHeight);
-      if (!_pointInSemicircle(screenPos.dx, screenPos.dy, centerX, circleCenterY, r)) {
-        return false;
+      if (!holePath.contains(screenPos)) {
+        failedIndices.add(i);
       }
     }
-    return true;
+    return (failedIndices.isEmpty, failedIndices);
+  }
+
+  /// 构建与 WallPainter 完全一致的空洞路径（供 contains 判断）
+  Path _buildHolePath(Size size) {
+    final centerX = size.width * 0.5;
+    final holeW = size.shortestSide * _holeWidthRatio;
+    final r = holeW / 2;
+    final circleCenterY = size.height - r;
+    final holePath = Path();
+    holePath.moveTo(centerX - r, size.height);
+    holePath.lineTo(centerX + r, size.height);
+    holePath.lineTo(centerX + r, circleCenterY);
+    holePath.arcTo(
+      Rect.fromCenter(center: Offset(centerX, circleCenterY), width: holeW, height: holeW),
+      0,
+      -pi,
+      false,
+    );
+    holePath.close();
+    return holePath;
   }
 
   Offset _normToScreenWithSize(double normX, double normY, Size screenSize, int imgW, int imgH) {
@@ -161,13 +203,6 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     final x = screenSize.width - (normX * imgW * scale + offsetX);
     final y = normY * imgH * scale + offsetY;
     return Offset(x, y);
-  }
-
-  bool _pointInSemicircle(double px, double py, double cx, double cy, double r) {
-    final dx = px - cx;
-    final dy = py - cy;
-    if (py < cy) return false; // 在半圆直径上方则不在洞内
-    return (dx * dx + dy * dy) <= (r * r);
   }
 
   /// 将归一化坐标 [0,1] 转换为屏幕坐标（考虑 FittedBox cover 与前置摄像头镜像）
@@ -214,6 +249,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       _gameResult = null;
       _checkTriggered = false;
       _keypoints = [];
+      _failedKeypointIndices = [];
     });
     _wallAnimationController.forward();
     _startPoseDetection();
@@ -253,10 +289,15 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         final kpts = (data['keypoints'] as List<dynamic>?)
             ?.map((e) => (e as List<dynamic>).map((v) => (v as num).toDouble()).toList())
             .toList();
+        final annBase64 = data['annotated_image_base64'] as String?;
+        final annBytes = annBase64 != null && annBase64.isNotEmpty
+            ? Uint8List.fromList(base64Decode(annBase64))
+            : null;
         setState(() {
           _keypoints = kpts ?? [];
           _imageWidth = (data['image_width'] as num?)?.toInt() ?? 0;
           _imageHeight = (data['image_height'] as num?)?.toInt() ?? 0;
+          _annotatedImageBytes = annBytes;
         });
       } else if (response.statusCode != 200) {
         debugPrint('[Pose] API error: ${response.body}');
@@ -279,6 +320,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       _gameResult = null;
       _checkTriggered = false;
       _keypoints = [];
+      _failedKeypointIndices = [];
       _gameStarted = false;
     });
     _wallAnimationController.reset();
@@ -311,12 +353,26 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
-  /// 始终显示实时摄像头预览，不替换为静态图，保证画面持续可见
+  /// 游戏进行中显示后端返回的 YOLO 标注图像流（镜像翻转）；否则显示摄像头预览
   Widget _buildVideoDisplay() {
+    if (_gameStarted && _annotatedImageBytes != null && _annotatedImageBytes!.isNotEmpty) {
+      return Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()..scale(-1.0, 1.0),
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: Image.memory(
+            _annotatedImageBytes!,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+          ),
+        ),
+      );
+    }
     return _buildCameraPreview();
   }
 
-  /// 在摄像头画面上叠加关键点（游戏进行中且有关键点数据时）
+  /// 在视频流画面上叠加关键点：绿色为正常，游戏结束未过关的点为红色
   Widget _buildKeypointsOverlay() {
     final size = MediaQuery.of(context).size;
     return IgnorePointer(
@@ -326,6 +382,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           keypoints: _keypoints,
           imageWidth: _imageWidth,
           imageHeight: _imageHeight,
+          failedIndices: _gameResult == false ? _failedKeypointIndices : const [],
         ),
       ),
     );
@@ -662,17 +719,20 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
 
 
-/// 在摄像头画面上绘制关键点（与 _normToScreen 一致的 cover + 前置镜像）
+/// 在视频流画面上绘制关键点：绿色为正常，未过关的点为红色
+/// failedIndices：未过关时，覆盖在墙上的关键点索引，将以红色显示
 class KeypointsOverlayPainter extends CustomPainter {
   KeypointsOverlayPainter({
     required this.keypoints,
     required this.imageWidth,
     required this.imageHeight,
+    this.failedIndices = const [],
   });
 
   final List<List<double>> keypoints;
   final int imageWidth;
   final int imageHeight;
+  final List<int> failedIndices;
 
   static Offset _normToScreen(double normX, double normY, Size screenSize, int imgW, int imgH) {
     if (imgW <= 0 || imgH <= 0) return Offset.zero;
@@ -690,16 +750,20 @@ class KeypointsOverlayPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final pointPaint = Paint()
-      ..color = const Color(0xFF3D7A35)
-      ..style = PaintingStyle.fill;
+    final failedSet = failedIndices.toSet();
+    const greenColor = Color(0xFF3D7A35);
+    const redColor = Color(0xFFFF1744);
     final strokePaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
-    for (final kp in keypoints) {
+    for (var i = 0; i < keypoints.length; i++) {
+      final kp = keypoints[i];
       if (kp.length < 2) continue;
       final pos = _normToScreen(kp[0], kp[1], size, imageWidth, imageHeight);
+      final pointPaint = Paint()
+        ..color = failedSet.contains(i) ? redColor : greenColor
+        ..style = PaintingStyle.fill;
       canvas.drawCircle(pos, 8, pointPaint);
       canvas.drawCircle(pos, 8, strokePaint);
     }
@@ -709,7 +773,8 @@ class KeypointsOverlayPainter extends CustomPainter {
   bool shouldRepaint(covariant KeypointsOverlayPainter oldDelegate) {
     return oldDelegate.keypoints != keypoints ||
         oldDelegate.imageWidth != imageWidth ||
-        oldDelegate.imageHeight != imageHeight;
+        oldDelegate.imageHeight != imageHeight ||
+        oldDelegate.failedIndices != failedIndices;
   }
 }
 
