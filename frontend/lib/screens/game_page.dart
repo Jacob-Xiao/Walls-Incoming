@@ -484,104 +484,183 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildResultIsland() {
-    final passed = _gameResult!;
+   Widget _buildResultIsland() {
+    final passed = _gameResult ?? false;
+    final glow = passed ? const Color(0xFF00E676) : const Color(0xFFFF1744);
+
     return Center(
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: 340,
-          padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A2F17).withOpacity(0.95),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: passed ? const Color(0xFF4CAF50) : const Color(0xFFE53935),
-              width: 3,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.6),
-                blurRadius: 28,
-                spreadRadius: 2,
-              ),
-              BoxShadow(
-                color: (passed ? const Color(0xFF4CAF50) : const Color(0xFFE53935)).withOpacity(0.3),
-                blurRadius: 36,
-                spreadRadius: -4,
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                passed ? Icons.emoji_events : Icons.cancel,
-                size: 64,
-                color: passed ? const Color(0xFF4CAF50) : const Color(0xFFE53935),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                passed ? '过关' : '未过关',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: passed ? const Color(0xFF4CAF50) : const Color(0xFFE53935),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                passed ? '所有关键点均在空洞内！' : '部分关键点触碰墙体',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.white.withOpacity(0.7),
-                ),
-              ),
-              const SizedBox(height: 28),
-              Row(
-                children: [
-                  Expanded(
-                    child: SizedBox(
-                      height: 48,
-                      child: OutlinedButton(
-                        onPressed: _goHome,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white70,
-                          side: BorderSide(color: Colors.white.withOpacity(0.5)),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('返回主页'),
-                      ),
-                    ),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.88, end: 1.0),
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutBack,
+        builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(26),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              width: 360,
+              padding: const EdgeInsets.fromLTRB(28, 26, 28, 24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0F1E).withOpacity(0.82),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: glow.withOpacity(0.9), width: 1.8),
+                boxShadow: [
+                  BoxShadow(
+                    color: glow.withOpacity(0.35),
+                    blurRadius: 30,
+                    spreadRadius: 2,
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: SizedBox(
-                      height: 48,
-                      child: FilledButton(
-                        onPressed: _playAgain,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF3D7A35),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('再玩一次'),
-                      ),
-                    ),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.65),
+                    blurRadius: 40,
+                    spreadRadius: 6,
                   ),
                 ],
               ),
-            ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Top scan bar
+                  Container(
+                    height: 6,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      gradient: LinearGradient(
+                        colors: [
+                          glow.withOpacity(0.0),
+                          glow.withOpacity(0.85),
+                          glow.withOpacity(0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  // Icon
+                  Container(
+                    width: 84,
+                    height: 84,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: glow.withOpacity(0.10),
+                      border: Border.all(color: glow.withOpacity(0.7), width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: glow.withOpacity(0.25),
+                          blurRadius: 22,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      passed ? Icons.emoji_events_rounded : Icons.warning_amber_rounded,
+                      size: 44,
+                      color: glow,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Title
+                  Text(
+                    passed ? 'CLEAR' : 'FAILED',
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 6,
+                      color: glow,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Message
+                  Text(
+                    passed
+                        ? 'Pose matched successfully.\nYou made it through!'
+                        : 'Pose mismatch detected.\nYou hit the wall.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      letterSpacing: 2,
+                      height: 1.4,
+                      color: Colors.white.withOpacity(0.75),
+                    ),
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  // Divider
+                  Container(
+                    height: 1,
+                    width: double.infinity,
+                    color: Colors.white.withOpacity(0.12),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // Buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 48,
+                          child: OutlinedButton(
+                            onPressed: _goHome,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: BorderSide(color: Colors.white.withOpacity(0.35)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'BACK TO HOME',
+                              style: TextStyle(letterSpacing: 2),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: SizedBox(
+                          height: 48,
+                          child: FilledButton(
+                            onPressed: _playAgain,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: glow,
+                              foregroundColor: const Color(0xFF081018),
+                              elevation: 14,
+                              shadowColor: glow.withOpacity(0.7),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'PLAY AGAIN',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
     );
   }
-}
+} 
+
+
 
 /// 在摄像头画面上绘制关键点（与 _normToScreen 一致的 cover + 前置镜像）
 class KeypointsOverlayPainter extends CustomPainter {
@@ -643,14 +722,16 @@ class WallPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // 墙体：更偏赛博深色
     final wallPaint = Paint()
-      ..color = const Color(0xFF1A2F17).withOpacity(0.88)
+      ..color = const Color(0xFF0A0F1E).withOpacity(0.82)
       ..style = PaintingStyle.fill;
 
+    // 墙体边框：霓虹青
     final borderPaint = Paint()
-      ..color = const Color(0xFF3D7A35).withOpacity(0.9)
+      ..color = const Color(0xFF00E5FF).withOpacity(0.55)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
+      ..strokeWidth = 3;
 
     final rect = Offset.zero & size;
     final fullRectPath = Path()..addRect(rect);
@@ -660,9 +741,15 @@ class WallPainter extends CustomPainter {
     final r = holeW / 2;
     final circleCenterY = size.height - r;
 
+    // ===== 洞（用于挖空：必须闭合，包含底边没关系）=====
     final holePath = Path();
+
+    // ✅ 只用于画门框的轮廓（不画底边线）
+    final outlinePath = Path();
+
     switch (holeType) {
       case WallHoleType.semicircle:
+        // --- 挖洞 path（闭合）---
         holePath.moveTo(centerX - r, size.height);
         holePath.lineTo(centerX + r, size.height);
         holePath.lineTo(centerX + r, circleCenterY);
@@ -677,12 +764,61 @@ class WallPainter extends CustomPainter {
           false,
         );
         holePath.close();
+
+        // --- 门框轮廓 path（不画底边）---
+        // 1) 画上半圆弧（从右侧到左侧）
+        outlinePath.moveTo(centerX + r, circleCenterY);
+        outlinePath.arcTo(
+          Rect.fromCenter(
+            center: Offset(centerX, circleCenterY),
+            width: holeW,
+            height: holeW,
+          ),
+          0,
+          -pi,
+          false,
+        );
+
+        // 2) 左竖边（从左侧弧端往下）
+        outlinePath.lineTo(centerX - r, size.height);
+
+        // 3) 右竖边（单独一段，避免画底边）
+        outlinePath.moveTo(centerX + r, size.height);
+        outlinePath.lineTo(centerX + r, circleCenterY);
         break;
     }
 
-    final path = Path.combine(PathOperation.difference, fullRectPath, holePath);
-    canvas.drawPath(path, wallPaint);
-    canvas.drawPath(path, borderPaint);
+    // 挖洞
+    final cut = Path.combine(PathOperation.difference, fullRectPath, holePath);
+
+    // 先画墙
+    canvas.drawPath(cut, wallPaint);
+
+    // 墙外边框（如果你也不想它画底边，我后面可以再帮你改成 outline 版）
+    canvas.drawPath(cut, borderPaint);
+
+    // ===== 能量门框：沿洞边发光（不含底边）=====
+    final energyGlow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10
+      ..color = const Color(0xFF00E5FF).withOpacity(0.18)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16);
+
+    final energyLine = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4
+      ..color = const Color(0xFF00E5FF).withOpacity(0.85);
+
+    final energyMagenta = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = const Color(0xFFFF4DFF).withOpacity(0.55)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+
+    // ✅ 用 outlinePath 画门框（没有底部那条线）
+    canvas.drawPath(outlinePath, energyGlow);
+    canvas.drawPath(outlinePath, energyLine);
+    canvas.drawPath(outlinePath, energyMagenta);
   }
 
   @override
