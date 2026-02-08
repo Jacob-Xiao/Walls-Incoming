@@ -11,10 +11,9 @@ class HomePage extends StatelessWidget {
       body: Stack(
         children: [
           const Positioned.fill(
-            child: CyberRoadCrowdBackground(), // ✅ 动态背景：路+人群
+            child: CyberRoadCrowdBackground(),
           ),
 
-          // ✅ 你原来的 UI（标题+按钮）放上面
           SafeArea(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -40,7 +39,7 @@ class HomePage extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  '墙来了',
+                  'Here comes the wall',
                   style: TextStyle(
                     fontSize: 18,
                     color: Colors.white.withOpacity(0.75),
@@ -69,7 +68,7 @@ class HomePage extends StatelessWidget {
                         ),
                       ),
                       child: const Text(
-                        '开始游戏',
+                        'Start Game',
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,

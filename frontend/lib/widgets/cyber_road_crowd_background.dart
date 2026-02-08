@@ -44,8 +44,8 @@ class _CyberRoadCrowdBackgroundState extends State<CyberRoadCrowdBackground>
 }
 
 class _Runner {
-  double z; // 0 远 -> 1 近
-  int side; // -1 左 / +1 右
+  double z; // 0 far -> 1 near
+  int side; // -1 left / +1 right
   double laneOffset;
   double speed;
   final Color bodyColor;
@@ -81,7 +81,7 @@ class _CyberRoadCrowdPainter extends CustomPainter {
     final cx = size.width / 2;
     final horizonY = size.height * 0.28;
 
-    // ===== 赛博夜空渐变（蓝紫霓虹背景）=====
+    // Cyber night sky gradient
     final bg = Paint()
       ..shader = const LinearGradient(
         begin: Alignment.topCenter,
@@ -94,7 +94,7 @@ class _CyberRoadCrowdPainter extends CustomPainter {
       ).createShader(Offset.zero & size);
     canvas.drawRect(Offset.zero & size, bg);
 
-    // ===== 霓虹雾带 =====
+    // Neon fog band
     final fogShader = const LinearGradient(
       begin: Alignment.centerLeft,
       end: Alignment.centerRight,
@@ -113,10 +113,10 @@ class _CyberRoadCrowdPainter extends CustomPainter {
       fog,
     );
 
-    // ===== 城市天际线 =====
+    // City skyline
     _drawCity(canvas, size, horizonY);
 
-    // ===== 赛道（透视梯形）=====
+    // Road (perspective trapezoid)
     final roadTopW = size.width * 0.16;
     final roadBottomW = size.width * 0.94;
 
@@ -132,7 +132,7 @@ class _CyberRoadCrowdPainter extends CustomPainter {
       Paint()..color = const Color(0xFF070A14).withOpacity(0.85),
     );
 
-    // 霓虹路边 glow
+    // Neon road edge glow
     final edgeGlowCyan = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
@@ -147,13 +147,13 @@ class _CyberRoadCrowdPainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
     canvas.drawPath(roadPath, edgeGlowMagenta);
 
-    // 中线虚线（速度感）
+    // Center dashed line
     _drawDashes(canvas, size, cx, horizonY);
 
-    // 两侧彩色观众/角色跑动
+    // Crowd runners on both sides
     _drawCrowd(canvas, size, cx, horizonY, roadTopW, roadBottomW);
 
-    // 暗角聚焦
+    // Vignette
     final vignette = Paint()
       ..shader = RadialGradient(
         center: Alignment.topCenter,

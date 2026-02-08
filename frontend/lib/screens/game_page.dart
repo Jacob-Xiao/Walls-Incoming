@@ -6,13 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
-import 'dart:ui'; // ✅ 确保文件顶部有这个
+import 'dart:ui';
 
-// 后端 API 地址，可根据实际部署修改
+// Backend API base URL; change for deployment
 const String _apiBaseUrl = 'http://localhost:8000';
 
-/// 墙洞相对屏幕短边的宽度比例，判定与绘制共用
+/// Level 1: semicircle hole width ratio to shortest side (pass check and draw)
 const double _holeWidthRatio = 0.85;
+
+/// Level 2: center rectangle hole width ratio (medium width, through to bottom)
+const double _holeWidthRatioRect = 0.40;
 
 class GamePage extends StatefulWidget {
   const GamePage({super.key});
@@ -30,22 +33,28 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   late AnimationController _wallAnimationController;
   late Animation<double> _wallScaleAnimation;
 
-  /// 当前检测到的关键点 [x_norm, y_norm, confidence]，来自 result.keypoints.xyn 归一化 [0,1]
+  /// Keypoints [x_norm, y_norm, confidence] from result.keypoints.xyn normalized [0,1]
   List<List<double>> _keypoints = [];
   int _imageWidth = 0;
   int _imageHeight = 0;
 
-  /// 后端返回的 YOLO plot 图像流（img = results.plot(line_width=1)）
+  /// Backend YOLO plot image stream (img = results.plot(line_width=1))
   Uint8List? _annotatedImageBytes;
 
-  /// 过关判定结果：null=未判定，true=过关，false=未过关
+  /// Pass result: null = not checked, true = passed, false = failed
   bool? _gameResult;
 
-  /// 未过关时，覆盖在墙上的关键点索引
+  /// Keypoint indices on wall when failed (for red overlay)
   List<int> _failedKeypointIndices = [];
   Timer? _poseDetectionTimer;
   bool _checkTriggered = false;
   bool _isCapturing = false;
+
+  /// Current level: 1 = semicircle hole, 2 = center rectangle hole
+  int _currentLevel = 1;
+
+  /// Score for the last finished level (shown on result island)
+  int _lastScore = 0;
 
   @override
   void initState() {
@@ -55,7 +64,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(seconds: 8),
     );
-    // 墙缩放至 1.0 时与屏幕完全吻合
+    // Wall scale 1.0 = full screen
     _wallScaleAnimation = Tween<double>(begin: 0.25, end: 1.0).animate(
       CurvedAnimation(
         parent: _wallAnimationController,
@@ -73,7 +82,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
   }
 
   void _onWallAnimationTick() {
-    // 当墙缩放至 1.0 时进行判定（完全吻合）
+    // Check when wall scale reaches 1.0
     if (_wallScaleAnimation.value >= 0.99 && !_checkTriggered) {
       _triggerPassFailCheck();
     }
@@ -84,17 +93,18 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     _checkTriggered = true;
     _poseDetectionTimer?.cancel();
 
-    // 墙闭合的最后一帧进行判定，取该帧的墙进行对比判断
+    // Final frame at wall close for pass/fail check
     await _finalCaptureAndCheck();
   }
 
-  /// 拍墙闭合的最后一帧，等 API 返回后用该帧关键点与墙对比判定（有关键点覆盖在墙上则不通过）
+  /// Capture final frame at wall close; pass/fail from keypoints vs wall (any on wall = fail)
   Future<void> _finalCaptureAndCheck() async {
     final size = MediaQuery.of(context).size;
-    if (_controller == null || !_controller!.value.isInitialized || !mounted) {
+      if (_controller == null || !_controller!.value.isInitialized || !mounted) {
       if (mounted) setState(() {
         _gameResult = false;
         _failedKeypointIndices = [];
+        _lastScore = 0;
       });
       return;
     }
@@ -116,6 +126,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
         setState(() {
           _gameResult = false;
           _failedKeypointIndices = [];
+          _lastScore = 0;
         });
         return;
       }
@@ -126,18 +137,27 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       final w = (data['image_width'] as num?)?.toInt() ?? 0;
       final h = (data['image_height'] as num?)?.toInt() ?? 0;
       final (passed, failedIndices) = _checkKeypointsInHoleWithKeypoints(size, kpts ?? [], w, h);
+      final keypointCount = (kpts ?? []).length;
+      // Pass: 10 per keypoint. Fail: 10 per in-hole (green), 5 per on-wall (red)
+      final score = passed
+          ? keypointCount * 10
+          : (keypointCount - failedIndices.length) * 10 + failedIndices.length * 5;
+      Uint8List? imgBytes;
       final annBase64 = data['annotated_image_base64'] as String?;
-      final annBytes = annBase64 != null && annBase64.isNotEmpty
-          ? Uint8List.fromList(base64Decode(annBase64))
-          : null;
+      if (annBase64 != null && annBase64.isNotEmpty) {
+        try {
+          imgBytes = base64Decode(annBase64);
+        } catch (_) {}
+      }
       if (mounted) {
         setState(() {
           _keypoints = kpts ?? [];
           _imageWidth = w;
           _imageHeight = h;
-          _annotatedImageBytes = annBytes;
           _gameResult = passed;
           _failedKeypointIndices = passed ? [] : failedIndices;
+          _lastScore = score;
+          if (imgBytes != null) _annotatedImageBytes = imgBytes;
         });
       }
     } catch (e) {
@@ -145,12 +165,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
       if (mounted) setState(() {
         _gameResult = false;
         _failedKeypointIndices = [];
+        _lastScore = 0;
       });
     }
   }
 
-  /// 过关判定：墙闭合最后一帧，取该帧的墙进行对比；若有关键点覆盖在墙上则不通过
-  /// 返回 (是否过关, 覆盖在墙上的关键点索引列表)
+  /// Pass check: last frame at wall close; keypoints vs wall (any on wall = fail).
+  /// Returns (passed, list of keypoint indices on wall).
   (bool, List<int>) _checkKeypointsInHoleWithKeypoints(
     Size screenSize,
     List<List<double>> keypoints,
@@ -171,23 +192,33 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     return (failedIndices.isEmpty, failedIndices);
   }
 
-  /// 构建与 WallPainter 完全一致的空洞路径（供 contains 判断）
+  /// Build hole path matching WallPainter for contains check; depends on current level.
   Path _buildHolePath(Size size) {
     final centerX = size.width * 0.5;
-    final holeW = size.shortestSide * _holeWidthRatio;
-    final r = holeW / 2;
-    final circleCenterY = size.height - r;
     final holePath = Path();
-    holePath.moveTo(centerX - r, size.height);
-    holePath.lineTo(centerX + r, size.height);
-    holePath.lineTo(centerX + r, circleCenterY);
-    holePath.arcTo(
-      Rect.fromCenter(center: Offset(centerX, circleCenterY), width: holeW, height: holeW),
-      0,
-      -pi,
-      false,
-    );
-    holePath.close();
+    if (_currentLevel == 1) {
+      final holeW = size.shortestSide * _holeWidthRatio;
+      final r = holeW / 2;
+      final circleCenterY = size.height - r;
+      holePath.moveTo(centerX - r, size.height);
+      holePath.lineTo(centerX + r, size.height);
+      holePath.lineTo(centerX + r, circleCenterY);
+      holePath.arcTo(
+        Rect.fromCenter(center: Offset(centerX, circleCenterY), width: holeW, height: holeW),
+        0,
+        -pi,
+        false,
+      );
+      holePath.close();
+    } else {
+      // Level 2: center medium-width rectangle through to bottom
+      final holeW = size.shortestSide * _holeWidthRatioRect;
+      holePath.addRect(Rect.fromCenter(
+        center: Offset(centerX, size.height * 0.5),
+        width: holeW,
+        height: size.height,
+      ));
+    }
     return holePath;
   }
 
@@ -205,13 +236,13 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     return Offset(x, y);
   }
 
-  /// 将归一化坐标 [0,1] 转换为屏幕坐标（考虑 FittedBox cover 与前置摄像头镜像）
+  /// Convert normalized [0,1] to screen coords (FittedBox cover + front-camera mirror).
   Future<void> _initCamera() async {
     try {
       _cameras = await availableCameras();
       if (_cameras == null || _cameras!.isEmpty) {
         setState(() {
-          _cameraError = '未检测到摄像头';
+          _cameraError = 'No camera detected';
         });
         return;
       }
@@ -237,7 +268,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     } catch (e, st) {
       if (!mounted) return;
       setState(() {
-        _cameraError = '摄像头初始化失败: $e';
+        _cameraError = 'Camera init failed: $e';
       });
       debugPrint('Camera init error: $e\n$st');
     }
@@ -326,6 +357,20 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     _wallAnimationController.reset();
   }
 
+  /// Enter next level after clearing level 1
+  void _goToNextLevel() {
+    setState(() {
+      _currentLevel = 2;
+      _gameResult = null;
+      _checkTriggered = false;
+      _keypoints = [];
+      _failedKeypointIndices = [];
+    });
+    _wallAnimationController.reset();
+    _wallAnimationController.forward();
+    _startPoseDetection();
+  }
+
   @override
   void dispose() {
     _wallAnimationController.removeStatusListener(_onWallAnimationStatus);
@@ -353,7 +398,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
-  /// 游戏进行中显示后端返回的 YOLO 标注图像流（镜像翻转）；否则显示摄像头预览
+  /// During game show backend YOLO annotated stream (mirrored); else camera preview.
   Widget _buildVideoDisplay() {
     if (_gameStarted && _annotatedImageBytes != null && _annotatedImageBytes!.isNotEmpty) {
       return Transform(
@@ -372,7 +417,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     return _buildCameraPreview();
   }
 
-  /// 在视频流画面上叠加关键点：绿色为正常，游戏结束未过关的点为红色
+  /// Overlay keypoints on stream: green = ok, red = on wall when failed.
   Widget _buildKeypointsOverlay() {
     final size = MediaQuery.of(context).size;
     return IgnorePointer(
@@ -415,7 +460,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
           children: [
             CircularProgressIndicator(color: Color(0xFF3D7A35)),
             SizedBox(height: 16),
-            Text('正在启动摄像头...', style: TextStyle(color: Colors.white70)),
+            Text('Starting camera...', style: TextStyle(color: Colors.white70)),
           ],
         ),
       );
@@ -469,9 +514,9 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    '关卡 1',
-                    style: TextStyle(
+                  Text(
+                    'Level $_currentLevel',
+                    style: const TextStyle(
                       fontSize: 30,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 6,
@@ -480,7 +525,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '难度：简单',
+                    _currentLevel == 1 ? 'Difficulty: Easy' : 'Difficulty: Medium',
                     style: TextStyle(
                       fontSize: 14,
                       letterSpacing: 4,
@@ -503,7 +548,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                         ),
                       ),
                       child: const Text(
-                        '开始',
+                        'Start',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -532,7 +577,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
             child: CustomPaint(
               size: MediaQuery.of(context).size,
               painter: WallPainter(
-                holeType: WallHoleType.semicircle,
+                holeType: _currentLevel == 1 ? WallHoleType.semicircle : WallHoleType.rectangle,
               ),
             ),
           ),
@@ -647,6 +692,18 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                     ),
                   ),
 
+                  const SizedBox(height: 12),
+
+                  // Score
+                  Text(
+                    'Score: $_lastScore',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: glow,
+                    ),
+                  ),
+
                   const SizedBox(height: 22),
 
                   // Divider
@@ -680,6 +737,33 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
                           ),
                         ),
                       ),
+                      if (passed && _currentLevel == 1) ...[
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 48,
+                            child: FilledButton(
+                              onPressed: _goToNextLevel,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: glow,
+                                foregroundColor: const Color(0xFF081018),
+                                elevation: 14,
+                                shadowColor: glow.withOpacity(0.7),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text(
+                                'NEXT LEVEL',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(width: 14),
                       Expanded(
                         child: SizedBox(
@@ -719,8 +803,7 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
 
 
 
-/// 在视频流画面上绘制关键点：绿色为正常，未过关的点为红色
-/// failedIndices：未过关时，覆盖在墙上的关键点索引，将以红色显示
+/// Draw keypoints on stream: green = ok, red = failed (on wall). Coords from xyn to screen (cover + mirror).
 class KeypointsOverlayPainter extends CustomPainter {
   KeypointsOverlayPainter({
     required this.keypoints,
@@ -778,7 +861,7 @@ class KeypointsOverlayPainter extends CustomPainter {
   }
 }
 
-enum WallHoleType { semicircle }
+enum WallHoleType { semicircle, rectangle }
 
 class WallPainter extends CustomPainter {
   WallPainter({required this.holeType});
@@ -787,12 +870,10 @@ class WallPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 墙体：更偏赛博深色
     final wallPaint = Paint()
       ..color = const Color(0xFF0A0F1E).withOpacity(0.82)
       ..style = PaintingStyle.fill;
 
-    // 墙体边框：霓虹青
     final borderPaint = Paint()
       ..color = const Color(0xFF00E5FF).withOpacity(0.55)
       ..style = PaintingStyle.stroke
@@ -802,19 +883,14 @@ class WallPainter extends CustomPainter {
     final fullRectPath = Path()..addRect(rect);
 
     final centerX = size.width * 0.5;
-    final holeW = size.shortestSide * _holeWidthRatio;
-    final r = holeW / 2;
-    final circleCenterY = size.height - r;
-
-    // ===== 洞（用于挖空：必须闭合，包含底边没关系）=====
     final holePath = Path();
-
-    // ✅ 只用于画门框的轮廓（不画底边线）
     final outlinePath = Path();
 
     switch (holeType) {
       case WallHoleType.semicircle:
-        // --- 挖洞 path（闭合）---
+        final holeW = size.shortestSide * _holeWidthRatio;
+        final r = holeW / 2;
+        final circleCenterY = size.height - r;
         holePath.moveTo(centerX - r, size.height);
         holePath.lineTo(centerX + r, size.height);
         holePath.lineTo(centerX + r, circleCenterY);
@@ -830,8 +906,6 @@ class WallPainter extends CustomPainter {
         );
         holePath.close();
 
-        // --- 门框轮廓 path（不画底边）---
-        // 1) 画上半圆弧（从右侧到左侧）
         outlinePath.moveTo(centerX + r, circleCenterY);
         outlinePath.arcTo(
           Rect.fromCenter(
@@ -843,26 +917,28 @@ class WallPainter extends CustomPainter {
           -pi,
           false,
         );
-
-        // 2) 左竖边（从左侧弧端往下）
         outlinePath.lineTo(centerX - r, size.height);
-
-        // 3) 右竖边（单独一段，避免画底边）
         outlinePath.moveTo(centerX + r, size.height);
         outlinePath.lineTo(centerX + r, circleCenterY);
         break;
+
+      case WallHoleType.rectangle:
+        final holeW = size.shortestSide * _holeWidthRatioRect;
+        final left = centerX - holeW / 2;
+        final right = centerX + holeW / 2;
+        holePath.addRect(Rect.fromLTRB(left, 0, right, size.height));
+        outlinePath.moveTo(right, 0);
+        outlinePath.lineTo(right, size.height);
+        outlinePath.lineTo(left, size.height);
+        outlinePath.lineTo(left, 0);
+        outlinePath.close();
+        break;
     }
 
-    // 挖洞
     final cut = Path.combine(PathOperation.difference, fullRectPath, holePath);
-
-    // 先画墙
     canvas.drawPath(cut, wallPaint);
-
-    // 墙外边框（如果你也不想它画底边，我后面可以再帮你改成 outline 版）
     canvas.drawPath(cut, borderPaint);
 
-    // ===== 能量门框：沿洞边发光（不含底边）=====
     final energyGlow = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 10
@@ -880,7 +956,6 @@ class WallPainter extends CustomPainter {
       ..color = const Color(0xFFFF4DFF).withOpacity(0.55)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
 
-    // ✅ 用 outlinePath 画门框（没有底部那条线）
     canvas.drawPath(outlinePath, energyGlow);
     canvas.drawPath(outlinePath, energyLine);
     canvas.drawPath(outlinePath, energyMagenta);
