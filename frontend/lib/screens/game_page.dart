@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'dart:ui'; // ✅ 确保文件顶部有这个
 
 // 后端 API 地址，可根据实际部署修改
 const String _apiBaseUrl = 'http://localhost:8000';
@@ -372,71 +373,97 @@ class _GamePageState extends State<GamePage> with TickerProviderStateMixin {
     );
   }
 
+  
+
   Widget _buildFloatingIsland() {
     return Center(
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: 320,
-          padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A2F17).withOpacity(0.92),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xFF3D7A35).withOpacity(0.8), width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.5),
-                blurRadius: 24,
-                spreadRadius: 2,
-              ),
-              BoxShadow(
-                color: const Color(0xFF3D7A35).withOpacity(0.2),
-                blurRadius: 32,
-                spreadRadius: -4,
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '关卡 1',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white.withOpacity(0.95),
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0.9, end: 1.0),
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutBack,
+        builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(26),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(
+              width: 340,
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0A0F1E).withOpacity(0.78),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(
+                  color: const Color(0xFF00E5FF).withOpacity(0.85),
+                  width: 1.8,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF00E5FF).withOpacity(0.35),
+                    blurRadius: 28,
+                    spreadRadius: 2,
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.65),
+                    blurRadius: 36,
+                    spreadRadius: 6,
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                '难度：简单',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.white.withOpacity(0.7),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: FilledButton(
-                  onPressed: _startGame,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF3D7A35),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '关卡 1',
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 6,
+                      color: Colors.white,
                     ),
                   ),
-                  child: const Text('开始', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '难度：简单',
+                    style: TextStyle(
+                      fontSize: 14,
+                      letterSpacing: 4,
+                      color: Colors.white.withOpacity(0.72),
+                    ),
+                  ),
+                  const SizedBox(height: 26),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: FilledButton(
+                      onPressed: _startGame,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF00E5FF),
+                        foregroundColor: const Color(0xFF081018),
+                        elevation: 12,
+                        shadowColor: const Color(0xFF00E5FF),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text(
+                        '开始',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 6,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
+
 
   Widget _buildWallOverlay() {
     return AnimatedBuilder(
